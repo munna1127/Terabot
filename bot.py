@@ -1,172 +1,102 @@
-import os
 import requests
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application,
+    ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     ContextTypes,
-    filters
+    filters,
 )
+from telegram.request import HTTPXRequest
 
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-
+BOT_TOKEN = "YOUR_BOT_TOKEN"
+API_KEY = "Aryan123@API"
 API_URL = "https://terabridge-api-bz8z.onrender.com/api/resolve"
-API_KEY = os.getenv("API_KEY")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     await update.message.reply_text(
-        "👋 TeraBox Downloader Bot\n\n"
-        "TeraBox link bhejo, main file details aur download link de dunga."
+        "👋 Send me a TeraBox link."
     )
 
 
-async def resolve_terabox(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def resolve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
 
-    url = update.message.text.strip()
-
-    if "terabox" not in url.lower():
-        await update.message.reply_text(
-            "❌ Sirf TeraBox link bhejo."
-        )
+    if "terabox" not in text and "1024terabox" not in text:
+        await update.message.reply_text("❌ Send a valid TeraBox link.")
         return
 
-
-    msg = await update.message.reply_text(
-        "⏳ Link process ho raha hai..."
-    )
-
+    msg = await update.message.reply_text("⏳ Resolving...")
 
     try:
-
-        headers = {
-            "x-api-key": API_KEY,
-            "Content-Type": "application/json"
-        }
-
-        payload = {
-            "url": url
-        }
-
-
-        response = requests.post(
+        r = requests.get(
             API_URL,
-            headers=headers,
-            json=payload,
-            timeout=60
+            headers={"X-API-Key": API_KEY},
+            params={
+                "url": text,
+                "mode": "stream"
+            },
+            timeout=120,
         )
 
-
-        data = response.json()
-
+        data = r.json()
 
         if data.get("status") != "success":
-
-            await msg.edit_text(
-                "❌ File resolve nahi hui."
-            )
+            await msg.edit_text("❌ Failed.")
             return
-
 
         file = data["files"][0]
 
+        caption = f"""
+🎬 <b>{file['filename']}</b>
 
-        filename = file.get("filename", "Unknown")
-        size = file.get("size_mb", "Unknown")
-        download = file.get("dlink")
+📦 Size: {file['size_mb']} MB
 
-        thumbnail = file.get(
-            "thumbnails",
-            {}
-        ).get("url1")
-
-
-        text = f"""
-✅ File Found
-
-📁 Name:
-{filename}
-
-📦 Size:
-{size} MB
 """
 
-
-        buttons = [
+        kb = [
             [
-                InlineKeyboardButton(
-                    "⬇️ Download",
-                    url=download
-                )
+                InlineKeyboardButton("▶ Watch", url=file["stream_url"]),
+                InlineKeyboardButton("⬇ Download", url=file["dlink"]),
             ]
         ]
 
+        thumb = file["thumbnails"]["url3"]
 
-        await msg.edit_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(buttons)
+        await update.message.reply_photo(
+            photo=thumb,
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(kb),
         )
 
+        await msg.delete()
 
     except Exception as e:
-
-        await msg.edit_text(
-            f"⚠️ Error:\n{e}"
-        )
-
-
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    await update.message.reply_text(
-        "TeraBox link bhejo aur wait karo."
-    )
-
+        await msg.edit_text(str(e))
 
 
 def main():
-
-    if not BOT_TOKEN:
-        print("BOT_TOKEN missing")
-        return
-
-    app = Application.builder().token(
-        BOT_TOKEN
-    ).build()
-
-
-    app.add_handler(
-        CommandHandler(
-            "start",
-            start
-        )
+    request = HTTPXRequest(
+        connect_timeout=30,
+        read_timeout=120,
+        write_timeout=120,
+        pool_timeout=120,
     )
 
-
-    app.add_handler(
-        CommandHandler(
-            "help",
-            help_command
-        )
+    app = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .request(request)
+        .build()
     )
 
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, resolve))
 
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            resolve_terabox
-        )
-    )
-
-
-    print("🤖 Bot Started")
-
-    app.run_polling()
-
+    print("Bot Started...")
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
